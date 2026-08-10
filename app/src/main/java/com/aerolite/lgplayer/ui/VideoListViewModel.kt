@@ -3,6 +3,9 @@ package com.aerolite.lgplayer.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.MediaStore
+import android.content.ContentUris
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aerolite.lgplayer.data.MediaFile
@@ -35,11 +38,18 @@ class VideoListViewModel(
     // History now works independently of the playlist items
     val history: StateFlow<List<PlaylistItem>> = _historyProgress.map { progressList ->
         progressList.map { progress ->
+            // Extract size from fingerprint (mediaUri) if possible
+            val extractedSize = try {
+                progress.mediaUri.substringAfterLast("_").toLong()
+            } catch (e: Exception) {
+                0L
+            }
+            
             PlaylistItem(
                 mediaUri = progress.originalUri, // Use the real URI for playback
                 name = progress.name,
                 duration = progress.duration,
-                size = 0, // Not stored in progress
+                size = extractedSize,
                 type = progress.type,
                 addedAt = progress.lastUpdated
             )
@@ -56,24 +66,33 @@ class VideoListViewModel(
 
     fun addToPlaylist(uri: Uri) {
         viewModelScope.launch {
-            // Take persistable permission to ensure we can play this file after app restart
+            // Take persistable permission
             try {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (e: Exception) {
-                // Not a document URI or permission cannot be persisted
-            }
+            } catch (e: Exception) {}
 
             val name = getFileName(context, uri)
             val size = getFileSize(context, uri)
+            
+            // Proactively try to resolve to a stable MediaStore URI
+            var finalUri = uri
+            if (uri.scheme == "content" && uri.authority != "media") {
+                val resolved = resolveStableUri(context, uri, name, size)
+                if (resolved != null) {
+                    Log.d("VideoListViewModel", "Resolved $uri to stable $resolved")
+                    finalUri = resolved
+                }
+            }
+
             val type = if (name.lowercase().let { it.endsWith(".mp3") || it.endsWith(".m4a") || it.endsWith(".wav") }) 
                 MediaType.AUDIO else MediaType.VIDEO
             
             playlistDao.addItem(
                 PlaylistItem(
-                    mediaUri = uri.toString(),
+                    mediaUri = finalUri.toString(),
                     name = name,
                     duration = 0,
                     size = size,
@@ -81,6 +100,31 @@ class VideoListViewModel(
                 )
             )
         }
+    }
+
+    private fun resolveStableUri(context: Context, uri: Uri, name: String, size: Long): Uri? {
+        if (name.isEmpty() || size <= 0) return null
+
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+        val selectionArgs = arrayOf(name, size.toString())
+
+        val collections = listOf(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        )
+
+        for (collection in collections) {
+            try {
+                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+        return null
     }
 
     fun removeFromPlaylist(item: PlaylistItem) {

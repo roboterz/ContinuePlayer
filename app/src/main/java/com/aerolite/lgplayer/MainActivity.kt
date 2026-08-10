@@ -10,6 +10,8 @@ import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.content.ContentUris
 import android.provider.OpenableColumns
 import android.util.Log
 import android.util.Rational
@@ -100,7 +102,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     // 2. Load content
-                    sharedPlayerViewModel.load(route.videoUri, route.title)
+                    sharedPlayerViewModel.load(route.videoUri, route.title, route.fileSize)
 
                     // 3. Update navigation
                     if (backStack.lastOrNull() != route) {
@@ -168,8 +170,8 @@ class MainActivity : ComponentActivity() {
                             )
                             VideoListScreen(
                                 viewModel = videoListViewModel,
-                                onVideoClick = { uri, name ->
-                                    openMedia(Route.Player(uri, name))
+                                onVideoClick = { uri, name, size ->
+                                    openMedia(Route.Player(uri, name, size))
                                 }
                             )
                         }
@@ -179,7 +181,7 @@ class MainActivity : ComponentActivity() {
                             // Loading is handled by openMedia or initial intent. 
                             // We only need this if the route changes without openMedia.
                             LaunchedEffect(route.videoUri) {
-                                sharedPlayerViewModel.load(route.videoUri, route.title)
+                                sharedPlayerViewModel.load(route.videoUri, route.title, route.fileSize)
                             }
 
                             val isPlaying by sharedPlayerViewModel.isPlaying.collectAsState()
@@ -233,12 +235,68 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_VIEW) {
             val uri = intent.data
             if (uri != null) {
+                // Try to persist permission immediately when receiving external intent
+                if (uri.scheme == "content") {
+                    try {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    } catch (e: Exception) {}
+                }
+                
                 val displayName = intent.getStringExtra(Intent.EXTRA_TITLE)
                     ?: getFileNameFromUri(uri)
-                return Route.Player(uri.toString(), displayName)
+                val fileSize = getFileSizeFromUri(uri)
+
+                // Proactively resolve to stable MediaStore URI if possible
+                var finalUriString = uri.toString()
+                if (uri.scheme == "content" && uri.authority != "media") {
+                    resolveMediaStoreUri(uri, displayName, fileSize)?.let {
+                        Log.d("MainActivity", "Resolved intent URI $uri to stable $it")
+                        finalUriString = it.toString()
+                    }
+                }
+
+                return Route.Player(finalUriString, displayName, fileSize)
             }
         }
         return null
+    }
+
+    private fun resolveMediaStoreUri(uri: Uri, name: String?, size: Long): Uri? {
+        val fileName = name ?: getFileNameFromUri(uri) ?: return null
+        if (size <= 0) return null
+
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+        val selectionArgs = arrayOf(fileName, size.toString())
+
+        val collections = listOf(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        )
+
+        for (collection in collections) {
+            try {
+                contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+        return null
+    }
+
+    private fun getFileSizeFromUri(uri: Uri): Long {
+        try {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                return afd.length
+            }
+        } catch (e: Exception) {}
+        return 0
     }
 
     private fun getFileNameFromUri(uri: Uri): String? {

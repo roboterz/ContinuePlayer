@@ -26,7 +26,7 @@ import com.google.accompanist.permissions.*
 @Composable
 fun VideoListScreen(
     viewModel: VideoListViewModel,
-    onVideoClick: (String, String) -> Unit, // uri, name
+    onVideoClick: (String, String, Long) -> Unit, // uri, name, size
     modifier: Modifier = Modifier
 ) {
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -143,7 +143,7 @@ fun VideoListScreen(
                         items(filteredList, key = { it.mediaUri + selectedTab }) { item ->
                             PlaylistItemView(
                                 item = item,
-                                onClick = { onVideoClick(item.mediaUri, item.name) },
+                                onClick = { onVideoClick(item.mediaUri, item.name, item.size) },
                                 onRemove = if (selectedTab == 0) {
                                     { viewModel.removeFromPlaylist(item) }
                                 } else null

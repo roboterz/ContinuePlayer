@@ -10,6 +10,7 @@ sealed interface Route {
     @Serializable
     data class Player(
         val videoUri: String,
-        val title: String? = null
+        val title: String? = null,
+        val fileSize: Long? = null
     ) : Route
 }

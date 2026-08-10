@@ -6,6 +6,9 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.OptIn
+import android.provider.MediaStore
+import android.content.ContentUris
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -116,24 +119,117 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun load(uri: String, title: String?) {
+    fun load(uri: String, title: String?, fileSize: Long? = null) {
+        var finalUriString = uri
+        val parsedUri = Uri.parse(uri)
+        
+        // Try to persist permission
+        persistUriPermission(getApplication(), parsedUri)
+        
+        // Proactively try to find a stable MediaStore URI if it's not already one.
+        // This ensures "permanent" access regardless of temporary grants.
+        if (!isMediaStoreUri(parsedUri)) {
+            val resolvedUri = resolveStableUri(getApplication(), parsedUri, title, fileSize)
+            if (resolvedUri != null) {
+                Log.d("PlayerViewModel", "Proactively resolved $uri to stable URI $resolvedUri")
+                finalUriString = resolvedUri.toString()
+            }
+        } else if (!canReadUri(getApplication(), parsedUri)) {
+            // If it IS a MediaStore URI but we can't read it (rare), try re-resolving
+            val resolvedUri = resolveStableUri(getApplication(), parsedUri, title, fileSize)
+            if (resolvedUri != null) {
+                finalUriString = resolvedUri.toString()
+            }
+        }
+
         // If it's the same URI and we're already playing/buffering, don't interrupt.
-        // But if there was an error or it's idle, allow reloading.
         val currentPlayer = _player.value
-        if (currentUri == uri && currentPlayer != null && 
+        if (currentUri == finalUriString && currentPlayer != null && 
             currentPlayer.playbackState != Player.STATE_IDLE && 
             currentPlayer.playerError == null) {
             return
         }
         
-        currentUri = uri
+        currentUri = finalUriString
         _playbackError.value = null
-        _displayTitle.value = title ?: getFileName(getApplication(), Uri.parse(uri))
-        currentPlaybackKey = getFileFingerprint(getApplication(), Uri.parse(uri))
+        val finalParsedUri = Uri.parse(finalUriString)
+        _displayTitle.value = title ?: getFileName(getApplication(), finalParsedUri)
+        currentPlaybackKey = getFileFingerprint(getApplication(), finalParsedUri)
         hasResumedProgress = false
         
         if (currentPlayer != null) {
-            performLoad(currentPlayer, uri)
+            performLoad(currentPlayer, finalUriString)
+        }
+    }
+
+    private fun isMediaStoreUri(uri: Uri): Boolean {
+        return uri.scheme == "content" && uri.authority == "media"
+    }
+
+    private fun canReadUri(context: Context, uri: Uri): Boolean {
+        return try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use {}
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun resolveStableUri(context: Context, uri: Uri, title: String?, fileSize: Long?): Uri? {
+        var name = ""
+        var size = fileSize ?: -1L
+        
+        // Try to get info even if AFDs fail, maybe query works
+        try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    name = cursor.getString(0) ?: ""
+                    if (size <= 0) size = cursor.getLong(1)
+                }
+            }
+        } catch (e: Exception) {}
+        
+        if (name.isEmpty()) name = title ?: uri.lastPathSegment ?: ""
+        if (name.isEmpty() || size <= 0) return null
+
+        Log.d("PlayerViewModel", "Searching MediaStore for $name with size $size")
+
+        // Query MediaStore for a match
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+        val selectionArgs = arrayOf(name, size.toString())
+
+        // Try Video first, then Audio
+        val collections = listOf(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        )
+
+        for (collection in collections) {
+            try {
+                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+        
+        return null
+    }
+
+    private fun persistUriPermission(context: Context, uri: Uri) {
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                Log.d("PlayerViewModel", "Persisted permission for $uri")
+            } catch (e: Exception) {
+                Log.w("PlayerViewModel", "Could not persist permission for $uri: ${e.message}")
+            }
         }
     }
 
