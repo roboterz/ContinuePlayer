@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.media3.common.Player
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,6 +49,7 @@ fun PlayerScreen(
     val player by viewModel.player.collectAsState()
     val title by viewModel.displayTitle.collectAsState()
     val resizeMode by viewModel.resizeMode.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
 
     var isLandscape by remember { 
         mutableStateOf(context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
@@ -250,6 +254,20 @@ fun PlayerScreen(
                 )
 
                 Row {
+                    IconButton(
+                        onClick = { viewModel.toggleRepeatMode() }
+                    ) {
+                        val icon = when (repeatMode) {
+                            Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
+                            else -> Icons.Default.Repeat
+                        }
+                        val tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color.White.copy(alpha = 0.5f) else Color.White
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = "Repeat Mode",
+                            tint = tint
+                        )
+                    }
                     IconButton(
                         onClick = { viewModel.toggleResizeMode() }
                     ) {
