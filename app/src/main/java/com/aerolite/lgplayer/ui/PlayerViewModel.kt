@@ -51,6 +51,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _resizeMode = MutableStateFlow(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT)
     val resizeMode: StateFlow<Int> = _resizeMode.asStateFlow()
 
+    private val _repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
+    val repeatMode: StateFlow<Int> = _repeatMode.asStateFlow()
+
     private var currentUri: String? = null
     private var currentPlaybackKey: String? = null
     private var hasResumedProgress = false
@@ -71,6 +74,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             _playbackError.value = "Playback error: ${error.localizedMessage ?: "Unknown error"}"
             _isPlaying.value = false
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            _repeatMode.value = repeatMode
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -99,6 +106,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val controller = controllerFuture?.get() ?: return@addListener
                 _player.value = controller
+                _repeatMode.value = controller.repeatMode
                 controller.addListener(playerListener)
                 currentUri?.let { uri -> 
                     performLoad(controller, uri) 
@@ -117,6 +125,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
             else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
+    }
+
+    fun toggleRepeatMode() {
+        val nextMode = when (_repeatMode.value) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
+            Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_OFF
+            else -> Player.REPEAT_MODE_OFF
+        }
+        _player.value?.repeatMode = nextMode
     }
 
     fun load(uri: String, title: String?, fileSize: Long? = null) {
