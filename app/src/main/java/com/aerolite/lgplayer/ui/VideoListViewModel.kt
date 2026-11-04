@@ -8,9 +8,9 @@ import android.content.ContentUris
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aerolite.lgplayer.data.MediaFile
 import com.aerolite.lgplayer.data.MediaRepository
 import com.aerolite.lgplayer.data.MediaType
+import com.aerolite.lgplayer.data.determineMediaType
 import com.aerolite.lgplayer.data.database.LGPlayerDatabase
 import com.aerolite.lgplayer.data.database.PlaybackProgress
 import com.aerolite.lgplayer.data.database.PlaylistItem
@@ -32,6 +32,12 @@ class VideoListViewModel(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     val playlist: StateFlow<List<PlaylistItem>> = playlistDao.getAllItems()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val videoPlaylist: StateFlow<List<PlaylistItem>> = playlistDao.getItemsByType(MediaType.VIDEO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val musicPlaylist: StateFlow<List<PlaylistItem>> = playlistDao.getItemsByType(MediaType.AUDIO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // History now works independently of the playlist items
@@ -86,8 +92,7 @@ class VideoListViewModel(
                 }
             }
 
-            val type = if (name.lowercase().let { it.endsWith(".mp3") || it.endsWith(".m4a") || it.endsWith(".wav") }) 
-                MediaType.AUDIO else MediaType.VIDEO
+            val type = determineMediaType(context, finalUri, name)
             
             playlistDao.addItem(
                 PlaylistItem(

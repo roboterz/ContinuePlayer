@@ -18,6 +18,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.aerolite.lgplayer.PlaybackService
+import com.aerolite.lgplayer.data.determineMediaType
 import com.aerolite.lgplayer.data.database.LGPlayerDatabase
 import com.aerolite.lgplayer.data.database.PlaybackProgress
 import com.google.common.util.concurrent.ListenableFuture
@@ -314,8 +315,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val duration = player.duration
         val uri = currentUri
         if (duration > 0 && uri != null) {
-            val type = if (uri.endsWith(".mp3") == true || uri.endsWith(".m4a") == true) 
-                com.aerolite.lgplayer.data.MediaType.AUDIO else com.aerolite.lgplayer.data.MediaType.VIDEO
+            val type = determineMediaType(getApplication(), Uri.parse(uri), _displayTitle.value)
             
             playbackDao.saveProgress(
                 PlaybackProgress(
@@ -339,8 +339,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 val currentPosition = p.currentPosition
                 val duration = p.duration
                 if (duration > 0) {
-                    val type = if (uri.endsWith(".mp3") == true || uri.endsWith(".m4a") == true) 
-                        com.aerolite.lgplayer.data.MediaType.AUDIO else com.aerolite.lgplayer.data.MediaType.VIDEO
+                    val type = determineMediaType(getApplication(), Uri.parse(uri), _displayTitle.value)
                     
                     val progress = PlaybackProgress(
                         mediaUri = key,

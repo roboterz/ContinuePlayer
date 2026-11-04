@@ -36,7 +36,8 @@ fun VideoListScreen(
     }
 
     val permissionState = rememberMultiplePermissionsState(permission)
-    val playlist by viewModel.playlist.collectAsState()
+    val videoPlaylist by viewModel.videoPlaylist.collectAsState()
+    val musicPlaylist by viewModel.musicPlaylist.collectAsState()
     val history by viewModel.history.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -97,12 +98,17 @@ fun VideoListScreen(
                         Tab(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            text = { Text("Playlist") }
+                            text = { Text("视频 (${videoPlaylist.size})") }
                         )
                         Tab(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
-                            text = { Text("History") }
+                            text = { Text("音乐 (${musicPlaylist.size})") }
+                        )
+                        Tab(
+                            selected = selectedTab == 2,
+                            onClick = { selectedTab = 2 },
+                            text = { Text("历史") }
                         )
                     }
                 }
@@ -123,12 +129,22 @@ fun VideoListScreen(
                 .padding(padding),
             contentAlignment = Alignment.Center
         ) {
-            val displayList = if (selectedTab == 0) playlist else history
+            val displayList = when (selectedTab) {
+                0 -> videoPlaylist
+                1 -> musicPlaylist
+                else -> history
+            }
+            
+            val emptyText = when (selectedTab) {
+                0 -> "视频播放列表为空"
+                1 -> "音乐播放列表为空"
+                else -> "暂无播放历史"
+            }
             
             if (isLoading && displayList.isEmpty()) {
                 CircularProgressIndicator()
             } else if (displayList.isEmpty()) {
-                Text(if (selectedTab == 0) "Your playlist is empty" else "No playback history")
+                Text(emptyText)
             } else {
                 val filteredList = if (searchQuery.isBlank()) {
                     displayList
@@ -137,14 +153,14 @@ fun VideoListScreen(
                 }
 
                 if (filteredList.isEmpty() && searchQuery.isNotBlank()) {
-                    Text("No results found for \"$searchQuery\"")
+                    Text("未找到 matching \"$searchQuery\" 的文件")
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(filteredList, key = { it.mediaUri + selectedTab }) { item ->
                             PlaylistItemView(
                                 item = item,
                                 onClick = { onVideoClick(item.mediaUri, item.name, item.size) },
-                                onRemove = if (selectedTab == 0) {
+                                onRemove = if (selectedTab == 0 || selectedTab == 1) {
                                     { viewModel.removeFromPlaylist(item) }
                                 } else {
                                     { viewModel.removeFromHistory(item) }
