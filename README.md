@@ -1,1 +1,1 @@
-# LGPlayer
+# ContinuePlayer
