@@ -34,9 +34,8 @@ class VideoListViewModel(
     val playlist: StateFlow<List<PlaylistItem>> = playlistDao.getAllItems()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _historyProgress = MutableStateFlow<List<PlaybackProgress>>(emptyList())
     // History now works independently of the playlist items
-    val history: StateFlow<List<PlaylistItem>> = _historyProgress.map { progressList ->
+    val history: StateFlow<List<PlaylistItem>> = playbackDao.getAllHistoryFlow().map { progressList ->
         progressList.map { progress ->
             // Extract size from fingerprint (mediaUri) if possible
             val extractedSize = try {
@@ -59,7 +58,7 @@ class VideoListViewModel(
     fun loadData() {
         viewModelScope.launch {
             _isLoading.value = true
-            _historyProgress.value = playbackDao.getAllHistory()
+            // History is now handled by the flow
             _isLoading.value = false
         }
     }
@@ -130,6 +129,16 @@ class VideoListViewModel(
     fun removeFromPlaylist(item: PlaylistItem) {
         viewModelScope.launch {
             playlistDao.removeItem(item)
+        }
+    }
+
+    fun removeFromHistory(item: PlaylistItem) {
+        viewModelScope.launch {
+            // Find all progress entries with this original URI and delete them by PK (mediaUri)
+            val entries = playbackDao.getProgressByOriginalUri(item.mediaUri)
+            entries.forEach { entry ->
+                playbackDao.deleteProgress(entry.mediaUri)
+            }
         }
     }
 
