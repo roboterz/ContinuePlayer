@@ -164,7 +164,10 @@ fun VideoListScreen(
                                     { viewModel.removeFromPlaylist(item) }
                                 } else {
                                     { viewModel.removeFromHistory(item) }
-                                }
+                                },
+                                onAddToPlaylist = if (selectedTab == 2) {
+                                    { viewModel.addToPlaylist(item) }
+                                } else null
                             )
                         }
                     }

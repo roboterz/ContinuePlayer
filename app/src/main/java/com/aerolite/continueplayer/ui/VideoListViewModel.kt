@@ -106,6 +106,30 @@ class VideoListViewModel(
         }
     }
 
+    fun addToPlaylist(item: PlaylistItem) {
+        viewModelScope.launch {
+            val uri = Uri.parse(item.mediaUri)
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {}
+
+            playlistDao.addItem(
+                PlaylistItem(
+                    mediaUri = item.mediaUri,
+                    name = item.name,
+                    duration = item.duration,
+                    size = item.size,
+                    type = item.type,
+                    addedAt = System.currentTimeMillis()
+                )
+            )
+            android.widget.Toast.makeText(context, "已添加到播放列表", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun resolveStableUri(context: Context, uri: Uri, name: String, size: Long): Uri? {
         if (name.isEmpty() || size <= 0) return null
 

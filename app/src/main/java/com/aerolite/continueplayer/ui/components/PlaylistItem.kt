@@ -5,9 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -27,6 +27,7 @@ fun PlaylistItemView(
     item: PlaylistItem,
     onClick: () -> Unit,
     onRemove: (() -> Unit)? = null, // Make remove optional
+    onAddToPlaylist: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     ListItem(
@@ -42,17 +43,30 @@ fun PlaylistItemView(
                 overflow = TextOverflow.Ellipsis
             )
         },
-        trailingContent = onRemove?.let {
+        trailingContent = if (onRemove != null || onAddToPlaylist != null) {
             {
-                IconButton(onClick = it) {
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = "Remove",
-                        tint = MaterialTheme.colorScheme.error
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    onAddToPlaylist?.let { onAdd ->
+                        IconButton(onClick = onAdd) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                contentDescription = "添加到播放列表",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    onRemove?.let { onRem ->
+                        IconButton(onClick = onRem) {
+                            Icon(
+                                imageVector = Icons.Rounded.Delete,
+                                contentDescription = "Remove",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
-        },
+        } else null,
         leadingContent = {
             if (item.type == MediaType.VIDEO) {
                 AsyncImage(
