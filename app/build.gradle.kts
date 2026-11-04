@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.aerolite.lgplayer"
+    namespace = "com.aerolite.continueplayer"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.aerolite.lgplayer"
+        applicationId = "com.aerolite.continueplayer"
         minSdk = 29
         targetSdk = 37
         versionCode = 1
