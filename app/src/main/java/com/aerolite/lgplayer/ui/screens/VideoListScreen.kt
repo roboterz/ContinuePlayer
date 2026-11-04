@@ -146,7 +146,9 @@ fun VideoListScreen(
                                 onClick = { onVideoClick(item.mediaUri, item.name, item.size) },
                                 onRemove = if (selectedTab == 0) {
                                     { viewModel.removeFromPlaylist(item) }
-                                } else null
+                                } else {
+                                    { viewModel.removeFromHistory(item) }
+                                }
                             )
                         }
                     }
