@@ -11,9 +11,13 @@ import android.content.ContentUris
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -21,6 +25,9 @@ import com.aerolite.continueplayer.PlaybackService
 import com.aerolite.continueplayer.data.determineMediaType
 import com.aerolite.continueplayer.data.database.ContinuePlayerDatabase
 import com.aerolite.continueplayer.data.database.PlaybackProgress
+import com.aerolite.continueplayer.data.lyrics.LrcParser
+import com.aerolite.continueplayer.data.lyrics.LyricData
+import com.aerolite.continueplayer.data.lyrics.SubtitleTrack
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.*
@@ -33,7 +40,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val database = ContinuePlayerDatabase.getDatabase(application)
     private val playbackDao = database.playbackDao()
     private var progressJob: Job? = null
-    
+
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
@@ -55,11 +62,30 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
     val repeatMode: StateFlow<Int> = _repeatMode.asStateFlow()
 
+    private val _mediaType = MutableStateFlow(com.aerolite.continueplayer.data.MediaType.VIDEO)
+    val mediaType: StateFlow<com.aerolite.continueplayer.data.MediaType> = _mediaType.asStateFlow()
+
+    // Subtitle & Lyric States
+    private val _subtitleTracks = MutableStateFlow<List<SubtitleTrack>>(emptyList())
+    val subtitleTracks: StateFlow<List<SubtitleTrack>> = _subtitleTracks.asStateFlow()
+
+    private val _isSubtitleDisabled = MutableStateFlow(false)
+    val isSubtitleDisabled: StateFlow<Boolean> = _isSubtitleDisabled.asStateFlow()
+
+    private val _lyricData = MutableStateFlow<LyricData?>(null)
+    val lyricData: StateFlow<LyricData?> = _lyricData.asStateFlow()
+
+    private val _currentLyricIndex = MutableStateFlow(-1)
+    val currentLyricIndex: StateFlow<Int> = _currentLyricIndex.asStateFlow()
+
+    private val _isLyricsVisible = MutableStateFlow(false)
+    val isLyricsVisible: StateFlow<Boolean> = _isLyricsVisible.asStateFlow()
+
     private var currentUri: String? = null
     private var currentPlaybackKey: String? = null
     private var hasResumedProgress = false
     private var controllerFuture: ListenableFuture<MediaController>? = null
-    
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -81,9 +107,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             _repeatMode.value = repeatMode
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+            updateSubtitleTracks(tracks)
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             _isBuffering.value = playbackState == Player.STATE_BUFFERING
-            
+
             val p = _player.value
             val key = currentPlaybackKey
             if (playbackState == Player.STATE_READY && !hasResumedProgress && p != null && key != null) {
@@ -109,8 +139,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 _player.value = controller
                 _repeatMode.value = controller.repeatMode
                 controller.addListener(playerListener)
-                currentUri?.let { uri -> 
-                    performLoad(controller, uri) 
+                updateSubtitleTracks(controller.currentTracks)
+                currentUri?.let { uri ->
+                    performLoad(controller, uri)
                 }
             } catch (e: Exception) {
                 _player.value = null
@@ -138,44 +169,179 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         _player.value?.repeatMode = nextMode
     }
 
+    fun toggleLyricsVisibility() {
+        _isLyricsVisible.value = !_isLyricsVisible.value
+    }
+
+    fun seekTo(positionMs: Long) {
+        _player.value?.seekTo(positionMs)
+        val lyrics = _lyricData.value
+        if (lyrics != null) {
+            _currentLyricIndex.value = lyrics.findCurrentIndex(positionMs)
+        }
+    }
+
+    fun selectSubtitleTrack(track: SubtitleTrack?) {
+        val p = _player.value ?: return
+        if (track == null) {
+            _isSubtitleDisabled.value = true
+            p.trackSelectionParameters = p.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+        } else {
+            _isSubtitleDisabled.value = false
+            val tracks = p.currentTracks
+            if (track.groupIndex < tracks.groups.size) {
+                val group = tracks.groups[track.groupIndex]
+                p.trackSelectionParameters = p.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setOverrideForType(
+                        TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex)
+                    )
+                    .build()
+            }
+        }
+        updateSubtitleTracks(p.currentTracks)
+    }
+
+    fun loadExternalFile(context: Context, uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                persistUriPermission(context, uri)
+                val fileName = getFileName(context, uri)
+                val ext = fileName.substringAfterLast('.', "").lowercase()
+
+                if (ext == "lrc") {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val parsed = LrcParser.parse(stream)
+                        _lyricData.value = parsed
+                        _isLyricsVisible.value = true
+                    }
+                } else if (ext in setOf("srt", "vtt", "ass", "ssa", "ttml", "xml")) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val parsed = LrcParser.parse(stream)
+                        if (parsed.entries.isNotEmpty()) {
+                            _lyricData.value = parsed
+                        }
+                    }
+
+                    val mimeType = when (ext) {
+                        "srt" -> MimeTypes.APPLICATION_SUBRIP
+                        "vtt" -> MimeTypes.TEXT_VTT
+                        "ass", "ssa" -> MimeTypes.TEXT_SSA
+                        "ttml", "xml" -> MimeTypes.APPLICATION_TTML
+                        else -> MimeTypes.APPLICATION_SUBRIP
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        addExternalSubtitleToPlayer(uri, mimeType, fileName)
+                    }
+                } else {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val parsed = LrcParser.parse(stream)
+                        if (parsed.entries.isNotEmpty()) {
+                            _lyricData.value = parsed
+                            _isLyricsVisible.value = true
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "Error loading external file: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun addExternalSubtitleToPlayer(uri: Uri, mimeType: String, label: String) {
+        val p = _player.value ?: return
+        val currentMediaItem = p.currentMediaItem ?: return
+        val currentPos = p.currentPosition
+        val playWhenReady = p.playWhenReady
+
+        val subConfig = MediaItem.SubtitleConfiguration.Builder(uri)
+            .setMimeType(mimeType)
+            .setLanguage("und")
+            .setLabel(label)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+
+        val existingConfigs = currentMediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
+        val updatedConfigs = existingConfigs + subConfig
+
+        val newMediaItem = currentMediaItem.buildUpon()
+            .setSubtitleConfigurations(updatedConfigs)
+            .build()
+
+        p.setMediaItem(newMediaItem, currentPos)
+        p.playWhenReady = playWhenReady
+        p.prepare()
+    }
+
+    private fun updateSubtitleTracks(tracks: Tracks) {
+        val p = _player.value ?: return
+        val textDisabled = p.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+        _isSubtitleDisabled.value = textDisabled
+
+        val list = mutableListOf<SubtitleTrack>()
+        var counter = 1
+        for ((groupIndex, group) in tracks.groups.withIndex()) {
+            if (group.type == C.TRACK_TYPE_TEXT) {
+                for (i in 0 until group.length) {
+                    val format = group.getTrackFormat(i)
+                    val isSelected = !textDisabled && group.isTrackSelected(i)
+                    val lang = format.language?.uppercase()
+                    val label = format.label ?: if (!lang.isNullOrEmpty()) "Subtitle ($lang)" else "Subtitle #$counter"
+                    val id = "${groupIndex}_$i"
+                    list.add(
+                        SubtitleTrack(
+                            id = id,
+                            name = label,
+                            language = format.language,
+                            isSelected = isSelected,
+                            groupIndex = groupIndex,
+                            trackIndex = i
+                        )
+                    )
+                    counter++
+                }
+            }
+        }
+        _subtitleTracks.value = list
+    }
+
     fun load(uri: String, title: String?, fileSize: Long? = null) {
         var finalUriString = uri
         val parsedUri = Uri.parse(uri)
-        
-        // Try to persist permission
+
         persistUriPermission(getApplication(), parsedUri)
-        
-        // Proactively try to find a stable MediaStore URI if it's not already one.
-        // This ensures "permanent" access regardless of temporary grants.
+
         if (!isMediaStoreUri(parsedUri)) {
             val resolvedUri = resolveStableUri(getApplication(), parsedUri, title, fileSize)
             if (resolvedUri != null) {
-                Log.d("PlayerViewModel", "Proactively resolved $uri to stable URI $resolvedUri")
                 finalUriString = resolvedUri.toString()
             }
         } else if (!canReadUri(getApplication(), parsedUri)) {
-            // If it IS a MediaStore URI but we can't read it (rare), try re-resolving
             val resolvedUri = resolveStableUri(getApplication(), parsedUri, title, fileSize)
             if (resolvedUri != null) {
                 finalUriString = resolvedUri.toString()
             }
         }
 
-        // If it's the same URI and we're already playing/buffering, don't interrupt.
         val currentPlayer = _player.value
-        if (currentUri == finalUriString && currentPlayer != null && 
-            currentPlayer.playbackState != Player.STATE_IDLE && 
+        if (currentUri == finalUriString && currentPlayer != null &&
+            currentPlayer.playbackState != Player.STATE_IDLE &&
             currentPlayer.playerError == null) {
             return
         }
-        
+
         currentUri = finalUriString
         _playbackError.value = null
         val finalParsedUri = Uri.parse(finalUriString)
         _displayTitle.value = title ?: getFileName(getApplication(), finalParsedUri)
         currentPlaybackKey = getFileFingerprint(getApplication(), finalParsedUri)
         hasResumedProgress = false
-        
+
         if (currentPlayer != null) {
             performLoad(currentPlayer, finalUriString)
         }
@@ -197,8 +363,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private fun resolveStableUri(context: Context, uri: Uri, title: String?, fileSize: Long?): Uri? {
         var name = ""
         var size = fileSize ?: -1L
-        
-        // Try to get info even if AFDs fail, maybe query works
+
         try {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
@@ -207,18 +372,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         } catch (e: Exception) {}
-        
+
         if (name.isEmpty()) name = title ?: uri.lastPathSegment ?: ""
         if (name.isEmpty() || size <= 0) return null
 
-        Log.d("PlayerViewModel", "Searching MediaStore for $name with size $size")
-
-        // Query MediaStore for a match
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
         val selectionArgs = arrayOf(name, size.toString())
 
-        // Try Video first, then Audio
         val collections = listOf(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -234,7 +395,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {}
         }
-        
+
         return null
     }
 
@@ -245,14 +406,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-                Log.d("PlayerViewModel", "Persisted permission for $uri")
-            } catch (e: Exception) {
-                Log.w("PlayerViewModel", "Could not persist permission for $uri: ${e.message}")
-            }
+            } catch (e: Exception) {}
         }
     }
 
     private fun performLoad(player: Player, uri: String) {
+        _lyricData.value = null
+        _currentLyricIndex.value = -1
+        _mediaType.value = determineMediaType(getApplication(), Uri.parse(uri), _displayTitle.value)
+
         val mediaItem = MediaItem.Builder()
             .setMediaId(currentPlaybackKey ?: uri)
             .setUri(Uri.parse(uri))
@@ -262,10 +424,59 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     .build()
             )
             .build()
-        
+
         player.setMediaItem(mediaItem, true)
         player.prepare()
         player.playWhenReady = true
+
+        autoSearchLocalSubtitlesAndLyrics(getApplication(), Uri.parse(uri), _displayTitle.value)
+    }
+
+    private fun autoSearchLocalSubtitlesAndLyrics(context: Context, mediaUri: Uri, title: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val baseName = title.substringBeforeLast('.')
+            if (baseName.isEmpty()) return@launch
+
+            val projection = arrayOf(
+                MediaStore.Files.FileColumns._ID,
+                MediaStore.Files.FileColumns.DISPLAY_NAME
+            )
+            val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
+            val selectionArgs = arrayOf("$baseName.%")
+            val collection = MediaStore.Files.getContentUri("external")
+
+            try {
+                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameCol) ?: continue
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        val id = cursor.getLong(idCol)
+                        val fileUri = ContentUris.withAppendedId(collection, id)
+
+                        if (ext == "lrc" && _lyricData.value == null) {
+                            context.contentResolver.openInputStream(fileUri)?.use { stream ->
+                                val parsed = LrcParser.parse(stream)
+                                if (parsed.entries.isNotEmpty()) {
+                                    _lyricData.value = parsed
+                                }
+                            }
+                        } else if (ext in setOf("srt", "vtt", "ass", "ssa") && _lyricData.value == null) {
+                            context.contentResolver.openInputStream(fileUri)?.use { stream ->
+                                val parsed = LrcParser.parse(stream)
+                                if (parsed.entries.isNotEmpty()) {
+                                    _lyricData.value = parsed
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("PlayerViewModel", "Auto search subtitle/lyric failed: ${e.message}")
+            }
+        }
     }
 
     private fun getFileFingerprint(context: Context, uri: Uri): String {
@@ -299,13 +510,26 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun startProgressSaving() {
         progressJob = viewModelScope.launch {
+            var lastSaveTime = 0L
             while (isActive) {
                 val p = _player.value
                 val key = currentPlaybackKey
-                if (p != null && p.isPlaying && key != null) {
-                    saveProgress(p, key)
+                if (p != null && p.isPlaying) {
+                    val lyrics = _lyricData.value
+                    if (lyrics != null && lyrics.entries.isNotEmpty()) {
+                        val idx = lyrics.findCurrentIndex(p.currentPosition)
+                        if (idx != _currentLyricIndex.value) {
+                            _currentLyricIndex.value = idx
+                        }
+                    }
+
+                    val now = System.currentTimeMillis()
+                    if (key != null && now - lastSaveTime >= 2000) {
+                        lastSaveTime = now
+                        saveProgress(p, key)
+                    }
                 }
-                delay(2000)
+                delay(250)
             }
         }
     }
@@ -316,7 +540,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val uri = currentUri
         if (duration > 0 && uri != null) {
             val type = determineMediaType(getApplication(), Uri.parse(uri), _displayTitle.value)
-            
+
             playbackDao.saveProgress(
                 PlaybackProgress(
                     mediaUri = key,
@@ -340,7 +564,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 val duration = p.duration
                 if (duration > 0) {
                     val type = determineMediaType(getApplication(), Uri.parse(uri), _displayTitle.value)
-                    
+
                     val progress = PlaybackProgress(
                         mediaUri = key,
                         originalUri = uri,

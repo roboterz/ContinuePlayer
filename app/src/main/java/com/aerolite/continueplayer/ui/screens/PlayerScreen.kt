@@ -3,7 +3,13 @@ package com.aerolite.continueplayer.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.media.AudioManager
+import android.net.Uri
+import android.util.TypedValue
 import android.view.ViewGroup
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -11,10 +17,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.ScreenRotation
-import androidx.media3.common.Player
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,14 +32,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.ui.PlayerView
-import com.aerolite.continueplayer.ui.PlayerViewModel
-import androidx.media3.common.util.UnstableApi
-import androidx.annotation.OptIn
-import androidx.activity.ComponentActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.PlayerView
+import com.aerolite.continueplayer.data.MediaType
+import com.aerolite.continueplayer.ui.PlayerViewModel
+import com.aerolite.continueplayer.ui.components.LyricsOverlay
+import com.aerolite.continueplayer.ui.components.SubtitleTrackDialog
+import com.aerolite.continueplayer.ui.components.VideoSubtitleOverlay
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -50,12 +61,38 @@ fun PlayerScreen(
     val title by viewModel.displayTitle.collectAsState()
     val resizeMode by viewModel.resizeMode.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
+    val mediaType by viewModel.mediaType.collectAsState()
 
-    var isLandscape by remember { 
+    // Lyrics and Subtitle states
+    val subtitleTracks by viewModel.subtitleTracks.collectAsState()
+    val isSubtitleDisabled by viewModel.isSubtitleDisabled.collectAsState()
+    val lyricData by viewModel.lyricData.collectAsState()
+    val currentLyricIndex by viewModel.currentLyricIndex.collectAsState()
+    val isLyricsVisible by viewModel.isLyricsVisible.collectAsState()
+
+    var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showFullScreenLyrics by remember { mutableStateOf(false) }
+
+    val currentLyricLineText = remember(lyricData, currentLyricIndex) {
+        if (currentLyricIndex >= 0 && lyricData != null && currentLyricIndex < lyricData!!.entries.size) {
+            lyricData!!.entries[currentLyricIndex].text
+        } else {
+            null
+        }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.loadExternalFile(context, it)
+        }
+    }
+
+    var isLandscape by remember {
         mutableStateOf(context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
     }
 
-    // Toggle orientation function
     val toggleOrientation = {
         val newOrientation = if (isLandscape) {
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -63,16 +100,13 @@ fun PlayerScreen(
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
         activity?.requestedOrientation = newOrientation
-        // isLandscape will be updated via configuration change automatically
     }
 
-    // Update isLandscape when configuration changes
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     LaunchedEffect(configuration.orientation) {
         isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     }
 
-    // Manage system bars visibility for immersive playback
     DisposableEffect(isInPipMode) {
         val window = activity?.window
         if (window != null) {
@@ -90,14 +124,13 @@ fun PlayerScreen(
             }
         }
     }
-    
-    // Brightness state (0.0 to 1.0)
-    var brightness by remember { 
+
+    var brightness by remember {
         mutableStateOf(activity?.window?.attributes?.screenBrightness ?: -1f)
     }
 
     var playerViewInstance by remember { mutableStateOf<PlayerView?>(null) }
-    
+
     Box(modifier = modifier
         .fillMaxSize()
         .background(Color.Black)
@@ -112,21 +145,19 @@ fun PlayerScreen(
             var startVolume = 0
             var startBrightness = 0f
             var totalDragY = 0f
-            var dragType = 0 // 0: None, 1: Brightness, 2: Volume
+            var dragType = 0
 
             detectVerticalDragGestures(
                 onDragStart = { offset ->
                     val width = size.width
                     val height = size.height
-                    // Define active zones (left 20% and right 20%)
                     val sideMargin = width * 0.2f
-                    // Avoid the very top to not interfere with status bar (top 10%)
                     val topMargin = height * 0.1f
 
                     dragType = when {
-                        offset.y < topMargin -> 0 // Ignore if started too high
-                        offset.x < sideMargin -> 1 // Left side: Brightness
-                        offset.x > width - sideMargin -> 2 // Right side: Volume
+                        offset.y < topMargin -> 0
+                        offset.x < sideMargin -> 1
+                        offset.x > width - sideMargin -> 2
                         else -> 0
                     }
 
@@ -139,14 +170,13 @@ fun PlayerScreen(
                 },
                 onVerticalDrag = { change, dragAmount ->
                     if (dragType == 0) return@detectVerticalDragGestures
-                    
+
                     change.consume()
                     totalDragY -= dragAmount
-                    
+
                     val dragRatio = if (size.height > 0) totalDragY / size.height else 0f
-                    
+
                     if (dragType == 1) {
-                        // 亮度控制
                         activity?.let { act ->
                             val newBrightness = (startBrightness + dragRatio).coerceIn(0.01f, 1f)
                             brightness = newBrightness
@@ -155,14 +185,13 @@ fun PlayerScreen(
                             act.window.attributes = lp
                         }
                     } else if (dragType == 2) {
-                        // 音量控制
                         val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                         val volumeDelta = (dragRatio * maxVol).toInt()
                         val newVol = (startVolume + volumeDelta).coerceIn(0, maxVol)
                         audioManager.setStreamVolume(
                             AudioManager.STREAM_MUSIC,
                             newVol,
-                            0 // Removed FLAG_SHOW_UI to be less intrusive, or keep it if preferred
+                            0
                         )
                     }
                 }
@@ -179,6 +208,20 @@ fun PlayerScreen(
                     )
                     useController = !isInPipMode
                     this.resizeMode = resizeMode
+
+                    subtitleView?.apply {
+                        setStyle(
+                            CaptionStyleCompat(
+                                android.graphics.Color.WHITE,
+                                android.graphics.Color.argb(170, 0, 0, 0),
+                                android.graphics.Color.TRANSPARENT,
+                                CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                                android.graphics.Color.BLACK,
+                                null
+                            )
+                        )
+                        setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+                    }
                     playerViewInstance = this
                 }
             },
@@ -186,6 +229,19 @@ fun PlayerScreen(
                 view.player = player
                 view.useController = !isInPipMode
                 view.resizeMode = resizeMode
+                view.subtitleView?.apply {
+                    setStyle(
+                        CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            android.graphics.Color.argb(170, 0, 0, 0),
+                            android.graphics.Color.TRANSPARENT,
+                            CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                            android.graphics.Color.BLACK,
+                            null
+                        )
+                    )
+                    setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+                }
                 playerViewInstance = view
             },
             modifier = Modifier.fillMaxSize()
@@ -212,7 +268,7 @@ fun PlayerScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
                 Button(
-                    onClick = { 
+                    onClick = {
                         player?.let {
                             it.prepare()
                             it.play()
@@ -222,6 +278,17 @@ fun PlayerScreen(
                     Text("Retry")
                 }
             }
+        }
+
+        // Single-line Video Subtitle Overlay at the bottom of the screen (for Video mode)
+        if (mediaType == MediaType.VIDEO && !isInPipMode && isLyricsVisible && !showFullScreenLyrics) {
+            VideoSubtitleOverlay(
+                currentText = currentLyricLineText,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                onSubtitleClick = {
+                    showFullScreenLyrics = true
+                }
+            )
         }
 
         if (!isInPipMode && title != null) {
@@ -254,6 +321,42 @@ fun PlayerScreen(
                 )
 
                 Row {
+                    // Subtitle Button
+                    IconButton(
+                        onClick = { showSubtitleDialog = true }
+                    ) {
+                        val hasActiveSubtitle = !isSubtitleDisabled && subtitleTracks.any { it.isSelected }
+                        val subtitleTint = if (hasActiveSubtitle) MaterialTheme.colorScheme.primary else Color.White
+                        Icon(
+                            imageVector = Icons.Default.Subtitles,
+                            contentDescription = "Subtitles",
+                            tint = subtitleTint
+                        )
+                    }
+
+                    // Lyrics Button
+                    IconButton(
+                        onClick = {
+                            if (mediaType == MediaType.VIDEO && isLyricsVisible && !showFullScreenLyrics) {
+                                showFullScreenLyrics = true
+                            } else {
+                                viewModel.toggleLyricsVisibility()
+                            }
+                        }
+                    ) {
+                        val hasLyrics = lyricData != null
+                        val lyricsTint = when {
+                            isLyricsVisible || showFullScreenLyrics -> MaterialTheme.colorScheme.primary
+                            hasLyrics -> Color.White
+                            else -> Color.White.copy(alpha = 0.5f)
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Lyrics,
+                            contentDescription = "Lyrics",
+                            tint = lyricsTint
+                        )
+                    }
+
                     IconButton(
                         onClick = { viewModel.toggleRepeatMode() }
                     ) {
@@ -288,6 +391,41 @@ fun PlayerScreen(
                     }
                 }
             }
+        }
+
+        // Subtitle Dialog
+        if (showSubtitleDialog && !isInPipMode) {
+            SubtitleTrackDialog(
+                subtitleTracks = subtitleTracks,
+                isSubtitleDisabled = isSubtitleDisabled,
+                onSelectTrack = { track ->
+                    viewModel.selectSubtitleTrack(track)
+                },
+                onLoadExternalFile = {
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                },
+                onDismiss = { showSubtitleDialog = false }
+            )
+        }
+
+        // Full-screen Lyrics Overlay (For Audio mode or when manually requested in Video mode)
+        if (!isInPipMode && ((mediaType == MediaType.AUDIO && isLyricsVisible) || showFullScreenLyrics)) {
+            LyricsOverlay(
+                lyricData = lyricData,
+                currentIndex = currentLyricIndex,
+                displayTitle = title,
+                onLineClick = { timeMs -> viewModel.seekTo(timeMs) },
+                onLoadExternalFile = {
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                },
+                onClose = {
+                    if (showFullScreenLyrics) {
+                        showFullScreenLyrics = false
+                    } else {
+                        viewModel.toggleLyricsVisibility()
+                    }
+                }
+            )
         }
     }
 }
