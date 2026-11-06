@@ -10,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aerolite.continueplayer.data.lyrics.SubtitleTrack
 
@@ -79,12 +81,16 @@ fun SubtitleTrackDialog(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                // Option: Load External Subtitle File
-                OutlinedButton(
+                // Option: Load External Subtitle File (High Contrast Button)
+                Button(
                     onClick = {
                         onDismiss()
                         onLoadExternalFile()
                     },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.DarkGray,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
@@ -92,10 +98,15 @@ fun SubtitleTrackDialog(
                     Icon(
                         imageVector = Icons.Default.FileUpload,
                         contentDescription = null,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("选择外部字幕 / 歌词文件")
+                    Text(
+                        text = "选择外部字幕 / 歌词文件",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         },
