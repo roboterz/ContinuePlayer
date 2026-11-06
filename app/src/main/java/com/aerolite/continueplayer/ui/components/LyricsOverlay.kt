@@ -1,15 +1,11 @@
 package com.aerolite.continueplayer.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileUpload
@@ -49,7 +45,7 @@ fun LyricsOverlay(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.82f))
+            .background(Color.Black.copy(alpha = 0.85f))
             .padding(16.dp)
     ) {
         Column(
@@ -84,7 +80,7 @@ fun LyricsOverlay(
                     )
                     if (!lyricData?.artist.isNullOrEmpty()) {
                         Text(
-                            text = lyricData!!.artist!!,
+                            text = lyricData.artist,
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.7f),
                             maxLines = 1,
@@ -116,22 +112,28 @@ fun LyricsOverlay(
                     ) {
                         Text(
                             text = "暂无匹配歌词",
-                            color = Color.White.copy(alpha = 0.6f),
+                            color = Color.White.copy(alpha = 0.8f),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
                         Button(
                             onClick = onLoadExternalFile,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                                containerColor = Color.DarkGray,
+                                contentColor = Color.White
                             )
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FileUpload,
                                 contentDescription = null,
+                                tint = Color.White,
                                 modifier = Modifier.size(18.dp).padding(end = 4.dp)
                             )
-                            Text("选择外部 LRC / Subtitle 歌词")
+                            Text(
+                                text = "选择外部 LRC / Subtitle 歌词",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -147,9 +149,9 @@ fun LyricsOverlay(
                     itemsIndexed(lyricData.entries) { index, entry ->
                         val isSelected = index == currentIndex
                         val color = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
+                            Color(0xFFFFD54F) // Vibrant bright gold for high contrast on dark overlay
                         } else {
-                            Color.White.copy(alpha = 0.55f)
+                            Color.White.copy(alpha = 0.65f)
                         }
                         val fontSize = if (isSelected) 22.sp else 16.sp
                         val fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
