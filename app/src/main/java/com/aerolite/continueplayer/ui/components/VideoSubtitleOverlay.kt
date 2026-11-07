@@ -25,11 +25,12 @@ fun VideoSubtitleOverlay(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 64.dp),
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
         Surface(
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(6.dp),
             color = Color.Black.copy(alpha = 0.75f),
             modifier = Modifier.then(
                 if (onSubtitleClick != null) Modifier.clickable { onSubtitleClick() } else Modifier
@@ -38,11 +39,11 @@ fun VideoSubtitleOverlay(
             Text(
                 text = currentText,
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
-                lineHeight = 24.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                lineHeight = 22.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
     }
