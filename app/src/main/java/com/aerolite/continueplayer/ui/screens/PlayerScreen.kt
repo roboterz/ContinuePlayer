@@ -281,7 +281,7 @@ fun PlayerScreen(
         }
 
         // Single-line Video Subtitle Overlay at the bottom of the screen (for Video mode)
-        if (mediaType == MediaType.VIDEO && !isInPipMode && isLyricsVisible && !showFullScreenLyrics) {
+        if (mediaType == MediaType.VIDEO && !isInPipMode && !isSubtitleDisabled && isLyricsVisible && !showFullScreenLyrics) {
             VideoSubtitleOverlay(
                 currentText = currentLyricLineText,
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -325,8 +325,8 @@ fun PlayerScreen(
                     IconButton(
                         onClick = { showSubtitleDialog = true }
                     ) {
-                        val hasActiveSubtitle = !isSubtitleDisabled && subtitleTracks.any { it.isSelected }
-                        val subtitleTint = if (hasActiveSubtitle) MaterialTheme.colorScheme.primary else Color.White
+                        val hasActiveSubtitle = !isSubtitleDisabled && (subtitleTracks.any { it.isSelected } || lyricData != null)
+                        val subtitleTint = if (hasActiveSubtitle) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.5f)
                         Icon(
                             imageVector = Icons.Default.Subtitles,
                             contentDescription = "Subtitles",
@@ -400,6 +400,9 @@ fun PlayerScreen(
                 isSubtitleDisabled = isSubtitleDisabled,
                 onSelectTrack = { track ->
                     viewModel.selectSubtitleTrack(track)
+                },
+                onToggleSubtitle = {
+                    viewModel.toggleSubtitle()
                 },
                 onLoadExternalFile = {
                     filePickerLauncher.launch(arrayOf("*/*"))

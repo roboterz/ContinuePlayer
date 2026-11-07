@@ -181,6 +181,27 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun toggleSubtitle() {
+        val p = _player.value ?: return
+        if (_isSubtitleDisabled.value) {
+            _isSubtitleDisabled.value = false
+            _isLyricsVisible.value = true
+            p.trackSelectionParameters = p.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .build()
+            val tracks = _subtitleTracks.value
+            if (tracks.isNotEmpty()) {
+                val selectedTrack = tracks.firstOrNull { it.isSelected } ?: tracks.first()
+                selectSubtitleTrack(selectedTrack)
+            } else {
+                updateSubtitleTracks(p.currentTracks)
+            }
+        } else {
+            selectSubtitleTrack(null)
+        }
+    }
+
     fun selectSubtitleTrack(track: SubtitleTrack?) {
         val p = _player.value ?: return
         if (track == null) {
@@ -191,6 +212,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 .build()
         } else {
             _isSubtitleDisabled.value = false
+            _isLyricsVisible.value = true
             val tracks = p.currentTracks
             if (track.groupIndex < tracks.groups.size) {
                 val group = tracks.groups[track.groupIndex]
@@ -217,6 +239,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val parsed = LrcParser.parse(stream)
                         _lyricData.value = parsed
+                        _isSubtitleDisabled.value = false
                         _isLyricsVisible.value = true
                     }
                 } else if (ext in setOf("srt", "vtt", "ass", "ssa", "ttml", "xml")) {
@@ -236,6 +259,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     }
 
                     withContext(Dispatchers.Main) {
+                        _isSubtitleDisabled.value = false
+                        _isLyricsVisible.value = true
                         addExternalSubtitleToPlayer(uri, mimeType, fileName)
                     }
                 } else {
@@ -243,6 +268,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         val parsed = LrcParser.parse(stream)
                         if (parsed.entries.isNotEmpty()) {
                             _lyricData.value = parsed
+                            _isSubtitleDisabled.value = false
                             _isLyricsVisible.value = true
                         }
                     }
@@ -271,6 +297,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         val newMediaItem = currentMediaItem.buildUpon()
             .setSubtitleConfigurations(updatedConfigs)
+            .build()
+
+        p.trackSelectionParameters = p.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .build()
 
         p.setMediaItem(newMediaItem, currentPos)

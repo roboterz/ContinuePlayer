@@ -20,6 +20,7 @@ fun SubtitleTrackDialog(
     subtitleTracks: List<SubtitleTrack>,
     isSubtitleDisabled: Boolean,
     onSelectTrack: (SubtitleTrack?) -> Unit,
+    onToggleSubtitle: () -> Unit,
     onLoadExternalFile: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -32,20 +33,57 @@ fun SubtitleTrackDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
+                Text(
+                    text = "字幕开关",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                // Option: Enable Subtitles
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (isSubtitleDisabled) {
+                                onToggleSubtitle()
+                            }
+                        }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = !isSubtitleDisabled,
+                        onClick = {
+                            if (isSubtitleDisabled) {
+                                onToggleSubtitle()
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "显示字幕",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
                 // Option: Disable Subtitles
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onSelectTrack(null) }
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     RadioButton(
-                        selected = isSubtitleDisabled || subtitleTracks.none { it.isSelected },
+                        selected = isSubtitleDisabled,
                         onClick = { onSelectTrack(null) }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("关闭字幕")
+                    Text(
+                        text = "关闭字幕",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
 
                 // Available Subtitle Tracks
