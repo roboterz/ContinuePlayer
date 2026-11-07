@@ -281,7 +281,10 @@ fun PlayerScreen(
         }
 
         // Single-line Video Subtitle Overlay at the bottom of the screen (for Video mode)
-        if (mediaType == MediaType.VIDEO && !isInPipMode && !isSubtitleDisabled && isLyricsVisible && !showFullScreenLyrics) {
+        // Only render VideoSubtitleOverlay if Media3 SubtitleView is NOT currently rendering an active text track
+        val hasActiveMedia3Subtitle = !isSubtitleDisabled && subtitleTracks.any { it.isSelected }
+
+        if (mediaType == MediaType.VIDEO && !isInPipMode && !isSubtitleDisabled && isLyricsVisible && !showFullScreenLyrics && !hasActiveMedia3Subtitle) {
             VideoSubtitleOverlay(
                 currentText = currentLyricLineText,
                 modifier = Modifier.align(Alignment.BottomCenter),
