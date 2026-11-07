@@ -221,6 +221,7 @@ fun PlayerScreen(
                             )
                         )
                         setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+                        setBottomPaddingFraction(0.015f)
                     }
                     playerViewInstance = this
                 }
@@ -241,6 +242,7 @@ fun PlayerScreen(
                         )
                     )
                     setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+                    setBottomPaddingFraction(0.015f)
                 }
                 playerViewInstance = view
             },
