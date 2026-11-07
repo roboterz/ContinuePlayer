@@ -501,6 +501,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                                     _lyricData.value = parsed
                                 }
                             }
+                            val mimeType = when (ext) {
+                                "srt" -> MimeTypes.APPLICATION_SUBRIP
+                                "vtt" -> MimeTypes.TEXT_VTT
+                                "ass", "ssa" -> MimeTypes.TEXT_SSA
+                                else -> MimeTypes.APPLICATION_SUBRIP
+                            }
+                            withContext(Dispatchers.Main) {
+                                addExternalSubtitleToPlayer(fileUri, mimeType, name)
+                            }
                         }
                     }
                 }
